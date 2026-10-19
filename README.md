@@ -1,5 +1,8 @@
 # Minecraft Server Backup
 
+![Python](https://img.shields.io/badge/python-3.11%2B-blue)
+![Release](https://img.shields.io/github/v/release/EllieK-coder/minecraft-server-backup)
+
 A Python command-line tool that creates safe, consistent backups of a Minecraft server world and automatically rotates old archives so disk usage stays under control.
 
 Built for modded (Forge) servers, where worlds get large and a corrupted save can mean losing weeks of progress.
@@ -10,19 +13,36 @@ Copying a world folder while the server is running can produce a broken backup, 
 
 ## Features
 
-- **Consistent snapshots**: uses RCON (`save-off` → `save-all` → `save-on`) so the world isn't being written to mid-backup
-- **Compressed, timestamped archives** of the world folder
-- **Backup rotation**: keeps the N most recent backups and deletes older ones automatically
-- **Installable CLI**: one `mcbackup` command built with `argparse`, packaged with a `pyproject.toml` entry point
-- **Logging** of each backup run
-- **Tested** with `pytest`
-
+- **Consistent snapshots**: pauses saves over RCON (`save-off` → `save-all flush` → archive → `save-on`)
+- **Guaranteed recovery**: `save-on` runs in a `finally` block, so saving is always resumed even if the backup fails
+- **Graceful fallback**: if RCON is unreachable, times out, or the password is wrong, the backup still runs and logs a warning
+- **Timestamped zip archives** of the world folder
+- **Backup rotation**: keeps the N most recent archives and deletes older ones automatically
 - **Dry-run mode** to preview what would be created and deleted
+- **Logging** to both the console and `mcbackup.log`
+- **Installable CLI**: one `mcbackup` command built with `argparse`, packaged with a `pyproject.toml` entry point
+- **Tested** with `pytest`, including mocked RCON tests that need no running server
+
+## How it works
+
+```
+mcbackup
+  ├─ connect to the server over RCON
+  ├─ save-off, then save-all flush        ← world is now static on disk
+  ├─ zip the world folder → world-YYYYMMDD-HHMMSS.zip
+  ├─ save-on                              ← always runs, even on failure
+  └─ delete archives beyond --keep
+```
 
 ## Requirements
 
 - Python 3.11+
-- A Minecraft server with RCON enabled (`enable-rcon=true` in `server.properties`)
+- A Minecraft server with RCON enabled. In `server.properties`:
+  ```
+  enable-rcon=true
+  rcon.port=25575
+  rcon.password=your-rcon-password
+  ```
 
 ## Installation
 
@@ -53,21 +73,27 @@ mcbackup --world "C:/servers/my-server/world" --dry-run
 | `--dry-run`       | Show what would happen without writing or deleting       |
 | `--verbose`       | Enable debug logging                                     |
 | `--rcon-host`     | RCON host (default: `127.0.0.1`)                         |
+| `--rcon-port`     | RCON port (default: `25575`)                             |
 | `--rcon-password` | RCON password (default: `$MCRCON_PASSWORD`)              |
 
-If no RCON password is set, or the server can't be reached, the backup still runs. You'll see a warning that saves weren't paused.
-
-Each run is logged to `mcbackup.log` in the backup folder.
+The password is read from the `MCRCON_PASSWORD` environment variable by default, so it doesn't end up in your shell history or scheduled task definitions.
 
 ### Scheduling
 
-To run backups automatically, schedule `mcbackup` with **Task Scheduler** (Windows) or **cron** (Linux).
+To run backups automatically, schedule `mcbackup` with **Task Scheduler** (Windows) or **cron** (Linux). For example, a nightly cron job:
+
+```
+0 4 * * * MCRCON_PASSWORD=secret mcbackup --world /srv/minecraft/world --keep 7
+```
 
 ## Project structure
 
 ```
-src/mcbackup/   # package source (CLI entry point: mcbackup.cli:main)
-tests/          # pytest test suite
+src/mcbackup/
+  cli.py        # argument parsing, logging setup, backup flow
+  rcon.py       # paused_saving() context manager around RCON commands
+  rotate.py     # finding archives and choosing which to delete
+tests/          # pytest suite
 pyproject.toml  # packaging and dependencies (hatchling)
 ```
 
@@ -80,17 +106,19 @@ pytest
 
 ## Roadmap
 
-- [x] Project skeleton and argparse CLI
+**v1.0.0 (released)**
 - [x] Archive the world folder
+- [x] RCON save pausing with guaranteed resume
+- [x] Fallback when RCON is unavailable
 - [x] Rotation of old backups
-- [x] Logging
-- [x] Test suite
-- [x] RCON save-off / save-all / save-on around the backup
-- [x] Dry-run mode
-- [ ] Configurable RCON port
-- [ ] Tests for the RCON flow
-- [ ] Config file support
+- [x] Dry-run mode and logging
+- [x] Test suite, including mocked RCON tests
+
+**Ideas for later**
+- [ ] Config file support (e.g. `mcbackup.toml`)
+- [ ] Back up multiple worlds or dimensions in one run
+- [ ] Optional upload to cloud storage
 
 ## Tech stack
 
-Python · RCON (`mcrcon`) · pytest · hatchling
+Python · argparse · RCON (`mcrcon`) · pytest · hatchling
