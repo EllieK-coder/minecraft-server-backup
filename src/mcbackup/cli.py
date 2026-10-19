@@ -1,14 +1,15 @@
 ﻿import argparse
 import logging
-import shutil
 import os
-from mcbackup.rcon import paused_saving
+import shutil
 from datetime import datetime
 from pathlib import Path
 
+from mcrcon import MCRconException
+
+from mcbackup.rcon import paused_saving
 from mcbackup.rotate import find_archives, select_for_deletion
 
-DEFAULT_WORLD = Path(r"C:\Users\Elianna\curseforge\minecraft\Instances\Autocraft\saves\test")
 DEFAULT_BACKUP_DIR = Path.home() / "mcbackups"
 
 log = logging.getLogger(__name__)
@@ -19,7 +20,7 @@ def parse_args() -> argparse.Namespace:
         prog="mcbackup",
         description="Back up a Minecraft world and prune old archives.",
     )
-    parser.add_argument("--world", type=Path, default=DEFAULT_WORLD,
+    parser.add_argument("--world", type=Path, required=True,
                         help="world folder to back up")
     parser.add_argument("--backup-dir", type=Path, default=DEFAULT_BACKUP_DIR,
                         help="where archives are written")
@@ -33,6 +34,8 @@ def parse_args() -> argparse.Namespace:
                         help="RCON host (default: 127.0.0.1)")
     parser.add_argument("--rcon-password", default=os.environ.get("MCRCON_PASSWORD"),
                         help="RCON password (default: $MCRCON_PASSWORD)")
+    parser.add_argument("--rcon-port", type=int, default=25575,
+                        help="RCON port (default: 25575)")
     return parser.parse_args()
 
 
@@ -65,10 +68,10 @@ def main() -> None:
         try:
             if args.rcon_password:
                 try:
-                    with paused_saving(args.rcon_host, args.rcon_password):
+                    with paused_saving(args.rcon_host, args.rcon_password, args.rcon_port):
                         archive = shutil.make_archive(str(dest), "zip", root_dir=args.world)
-                except ConnectionError:
-                    log.warning("RCON unavailable — backing up without pausing saves")
+                except (ConnectionError, TimeoutError, MCRconException) as exc:
+                    log.warning("RCON unavailable (%s) — backing up without pausing saves", exc)
                     archive = shutil.make_archive(str(dest), "zip", root_dir=args.world)
             else:
                 log.warning("No RCON password set — backing up without pausing saves")
